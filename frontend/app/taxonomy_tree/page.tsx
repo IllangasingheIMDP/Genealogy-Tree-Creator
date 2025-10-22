@@ -388,9 +388,13 @@ const TaxonomyTreePage = () => {
         });
         
         setStatus(`Expanded ${taxonName} (${rank}): found ${data.tuples.length} children`);
-        
+
         // Re-layout the graph
-        setTimeout(() => layout(), 100);
+        setTimeout(() => layout(), 500);
+        setTimeout(() => layout(), 1000);
+        setTimeout(() => layout(), 3000);
+        setTimeout(() => layout(), 5000);
+
       } else {
         setStatus(`No children found for ${taxonName} (${rank})`);
       }
@@ -955,6 +959,7 @@ const TaxonomyTreePage = () => {
           </button>
         )}
 
+        <ReactFlowProvider>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -1046,6 +1051,7 @@ const TaxonomyTreePage = () => {
               </div>
             )}
           </ReactFlow>
+        </ReactFlowProvider>
       </div>
       
       {/* Info Panel */}
