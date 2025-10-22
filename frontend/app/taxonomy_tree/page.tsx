@@ -391,8 +391,8 @@ const TaxonomyTreePage = () => {
 
         // Re-layout the graph
         setTimeout(() => layout(), 500);
-        setTimeout(() => layout(), 1000);
-        setTimeout(() => layout(), 3000);
+        setTimeout(() => changeLayout('TB'), 1000);
+        setTimeout(() => changeLayout('LR'), 2000);
         setTimeout(() => layout(), 5000);
 
       } else {
