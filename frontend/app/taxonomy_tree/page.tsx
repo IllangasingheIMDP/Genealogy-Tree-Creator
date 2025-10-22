@@ -632,7 +632,7 @@ const TaxonomyTreePage = () => {
 
     setSavingGraph(true);
     try {
-      const base = process.env.NEXT_PUBLIC_USER_API_URL || 'http://localhost:8080/api/users';
+      const base = process.env.NEXT_PUBLIC_API_GATEWAY_URL+"/api/users";
       const token = getToken();
 
       if (!token) {
@@ -680,7 +680,7 @@ const TaxonomyTreePage = () => {
   const loadSavedGraphs = useCallback(async () => {
     setLoadingGraphs(true);
     try {
-      const base = process.env.NEXT_PUBLIC_USER_API_URL || 'http://localhost:8080/api/users';
+      const base = process.env.NEXT_PUBLIC_API_GATEWAY_URL+"/api/users";
       const token = getToken();
 
       if (!token) {
@@ -711,7 +711,7 @@ const TaxonomyTreePage = () => {
   const handleLoadGraph = useCallback(
     async (graphId: string) => {
       try {
-        const base = process.env.NEXT_PUBLIC_USER_API_URL || 'http://localhost:8080/api/users';
+        const base = process.env.NEXT_PUBLIC_API_GATEWAY_URL+"/api/users";
         const token = getToken();
 
         if (!token) {
@@ -768,7 +768,7 @@ const TaxonomyTreePage = () => {
       if (!confirm(`Are you sure you want to delete "${graphName}"?`)) return;
 
       try {
-        const base = process.env.NEXT_PUBLIC_USER_API_URL || 'http://localhost:8080/api/users';
+       const base = process.env.NEXT_PUBLIC_API_GATEWAY_URL+"/api/users";
         const token = getToken();
 
         if (!token) {
