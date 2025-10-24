@@ -1,7 +1,18 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
+
 WORKDIR /app
-COPY . /app
-RUN pip install --no-cache-dir -U pip
-RUN pip install --no-cache-dir fastapi uvicorn[standard] httpx python-jose[cryptography]
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# Copy dependency files
+COPY pyproject.toml uv.lock* ./
+
+# Install dependencies
+RUN uv sync --frozen
+
+# Copy application code
+COPY app/ app/
+
 EXPOSE 8080
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uv","run","uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

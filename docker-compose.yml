@@ -11,6 +11,8 @@ services:
       - RELOAD=true
       - LOG_LEVEL=debug
       - NODE_ENV=development
+    env_file:
+      - ./backend/family-tree-service/.env
     volumes:
       - ./backend/family-tree-service/app:/app/app
     restart: unless-stopped
@@ -27,6 +29,8 @@ services:
       - RELOAD=true
       - LOG_LEVEL=debug
       - NODE_ENV=development
+    env_file:
+      - ./backend/language-tree-service/.env
     volumes:
       - ./backend/language-tree-service/app:/app/app
     restart: unless-stopped
@@ -43,30 +47,10 @@ services:
       - RELOAD=true
       - LOG_LEVEL=debug
       - NODE_ENV=development
+    env_file:
+      - ./backend/species-tree-service/.env
     volumes:
       - ./backend/species-tree-service/app:/app/app
-    restart: unless-stopped
-
-  # Frontend (Next.js) - Development Mode
-  frontend:
-    build:
-      context: ./frontend
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=development
-      - NEXT_PUBLIC_FAMILY_API_URL=http://localhost:8080/api/family
-      - NEXT_PUBLIC_LANGUAGE_API_URL=http://localhost:8080/api/language
-      - NEXT_PUBLIC_SPECIES_API_URL=http://localhost:8080/api/species
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
-    depends_on:
-      - family-tree-service
-      - language-tree-service
-      - species-tree-service
-      - user-service
     restart: unless-stopped
 
   # User Service - Authentication and user management
@@ -81,20 +65,15 @@ services:
       - RELOAD=true
       - LOG_LEVEL=debug
       - NODE_ENV=development
+    env_file:
+      - ./backend/user-service/.env
     volumes:
       - ./backend/user-service/app:/app/app
     depends_on:
       - mongo
     restart: unless-stopped
 
-  mongo:
-    image: mongo:6
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
-    restart: unless-stopped
-
+  # API Gateway
   api-gateway:
     build:
       context: ./backend/api-gateway
@@ -102,11 +81,47 @@ services:
       - "8080:8080"
     environment:
       - NODE_ENV=development
+      - FAMILY_SERVICE_URL=http://family-tree-service:8000/api/family
+      - LANGUAGE_SERVICE_URL=http://language-tree-service:8001/api/language
+      - SPECIES_SERVICE_URL=http://species-tree-service:8002/api/species
+      - USER_SERVICE_URL=http://user-service:8003/api/users
+      - FAMILY_WS_URL=ws://family-tree-service:8000/ws
+      - LANGUAGE_WS_URL=ws://language-tree-service:8001/ws
+      - SPECIES_WS_URL=ws://species-tree-service:8002/ws
+    env_file:
+      - ./backend/api-gateway/.env
     depends_on:
       - family-tree-service
       - language-tree-service
       - species-tree-service
       - user-service
+    restart: unless-stopped
+
+  # Frontend (Next.js) - Development Mode
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+    env_file:
+      - ./frontend/.env
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+  # MongoDB
+  mongo:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
     restart: unless-stopped
 
 networks:

@@ -1,5 +1,5 @@
 # # Single-stage Dockerfile for development mode
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ COPY uv.lock ./
 
 RUN uv sync --frozen --all-extras
 
-COPY .env ./
+
 
 COPY app/ ./app/
 
