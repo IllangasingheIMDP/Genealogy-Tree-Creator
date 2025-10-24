@@ -1192,37 +1192,102 @@ const LanguageTreePage = () => {
       resetGraphState(`Loading "${graph.graph_name}"...`);
       
       // Rebuild graph from saved data
-  const relationships = graph.graph_data as RelationshipRecord[];
+      const relationships = graph.graph_data as RelationshipRecord[];
+      
+      // Build all nodes and edges first, then set them in one batch
+      const newNodes: LanguageRFNode[] = [];
+      const newEdges: Edge[] = [];
+      const nodeMap = new Map<string, string>(); // label -> id
       
       relationships.forEach((rel: RelationshipRecord) => {
         const parentLabel = rel.language2;
         const childLabel = rel.language1;
         
         if (parentLabel && childLabel) {
-          const parentId = ensureNode(parentLabel, rel.language2_category, rel.language2_qid, rel.language2_types);
-          const childId = ensureNode(childLabel, rel.language1_category, rel.language1_qid, rel.language1_types);
-          
-          if (parentId && childId) {
-            const edgeId = `e-${parentId}-${childId}`;
-            setEdges(prev => {
-              if (prev.some(e => e.id === edgeId)) return prev;
-              return [...prev, createEdge(parentId, childId)];
+          // Create parent node if needed
+          let parentId = nodeMap.get(parentLabel);
+          if (!parentId) {
+            parentId = slugify(parentLabel);
+            let attempts = 1;
+            while ([...nodeMap.values()].includes(parentId)) {
+              attempts += 1;
+              parentId = `${slugify(parentLabel)}-${attempts}`;
+            }
+            nodeMap.set(parentLabel, parentId);
+            labelToIdRef.current.set(parentLabel, parentId);
+            newNodes.push({
+              id: parentId,
+              data: {
+                label: parentLabel,
+                category: rel.language2_category,
+                meta: rel.language2_category ? humanizeCategory(rel.language2_category) : undefined,
+                qid: rel.language2_qid,
+                types: rel.language2_types,
+                onExpand: () => expandNodeByLabel(parentLabel)
+              },
+              position: { x: 0, y: 0 },
+              type: 'language'
             });
+          }
+          
+          // Create child node if needed
+          let childId = nodeMap.get(childLabel);
+          if (!childId) {
+            childId = slugify(childLabel);
+            let attempts = 1;
+            while ([...nodeMap.values()].includes(childId)) {
+              attempts += 1;
+              childId = `${slugify(childLabel)}-${attempts}`;
+            }
+            nodeMap.set(childLabel, childId);
+            labelToIdRef.current.set(childLabel, childId);
+            newNodes.push({
+              id: childId,
+              data: {
+                label: childLabel,
+                category: rel.language1_category,
+                meta: rel.language1_category ? humanizeCategory(rel.language1_category) : undefined,
+                qid: rel.language1_qid,
+                types: rel.language1_types,
+                onExpand: () => expandNodeByLabel(childLabel)
+              },
+              position: { x: 0, y: 0 },
+              type: 'language'
+            });
+          }
+          
+          // Create edge
+          const edgeId = `e-${parentId}-${childId}`;
+          if (!newEdges.some(e => e.id === edgeId)) {
+            newEdges.push(createEdge(parentId, childId));
           }
         }
       });
 
+      // Apply layout to the new nodes/edges before setting state
+      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(newNodes, newEdges, layoutDirection);
+      
+      // Set nodes and edges in one batch
+      setNodes(layoutedNodes);
+      setEdges(layoutedEdges);
+      
       setStatus(`Loaded "${graph.graph_name}" with ${relationships.length} relationships`);
       setShowLoadModal(false);
       
-      // Layout after a short delay
-      setTimeout(() => layout(), 100);
+      // Fit view after a brief delay to ensure rendering is complete
+      setTimeout(() => {
+        try {
+          fitViewApi({ padding: 0.2, duration: 500 });
+        } catch (e) {
+          console.error('Error fitting view:', e);
+        }
+      }, 150);
     } catch (error) {
       console.error('Error loading graph:', error);
       const msg = error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error';
       alert(`Failed to load graph: ${msg}`);
     }
-  }, [getToken, resetGraphState, ensureNode, setEdges, createEdge, layout]);
+  }, [getToken, resetGraphState, setEdges, createEdge, setNodes, layoutDirection, humanizeCategory, expandNodeByLabel, fitViewApi]);
 
   // Delete a saved graph
   const handleDeleteGraph = useCallback(async (graphId: string, graphName: string) => {
