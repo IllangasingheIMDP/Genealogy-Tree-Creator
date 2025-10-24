@@ -389,7 +389,9 @@ const LanguageTreePage = () => {
   // Mapping label -> node id to avoid duplicates; stored in ref to persist across renders without causing rerenders
   const labelToIdRef = useRef<Map<string,string>>(new Map());
 
-  const slugify = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$|/g, '').slice(0,40) || 'lang';
+  const slugify = useCallback((label: string) => 
+    label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$|/g, '').slice(0,40) || 'lang'
+  , []);
 
   // Canonicalize labels to help unify variants like "Yola" vs "Yola dialect"
   const canonical = useCallback((label: string): string => {
@@ -494,7 +496,7 @@ const LanguageTreePage = () => {
       }];
     });
     return id;
-  }, [expandNodeByLabel, humanizeCategory, setNodes]);
+  }, [expandNodeByLabel, humanizeCategory, setNodes, slugify]);
 
   // Helpers to prompt user for input in a simple way
   const promptForLabel = useCallback((defaultValue = '') => {
@@ -644,6 +646,17 @@ const LanguageTreePage = () => {
   // Process streaming messages from backend (status, relationship, complete, error)
   useEffect(() => {
     if (!messages.length) return;
+    
+    // Collect all relationship messages in this batch to process atomically
+    const relationshipsToAdd: Array<{
+      childLabel: string;
+      parentLabel: string;
+      childCategory?: string;
+      parentCategory?: string;
+      childQid?: string;
+      parentQid?: string;
+    }> = [];
+    
     for (let i = lastProcessedIndexRef.current; i < messages.length; i++) {
       const msg = messages[i] as InboundMessage;
       if (!msg || typeof msg.type !== 'string' || i < searchSessionStartRef.current) continue;
@@ -693,26 +706,16 @@ const LanguageTreePage = () => {
               const parentLabel = relationship === 'Child of' ? l2 : l2;
               const childQid = relationship === 'Child of' ? qid1 : qid1;
               const parentQid = relationship === 'Child of' ? qid2 : qid2;
-              const parentId = ensureNode(parentLabel, c2, parentQid);
-              const childId = ensureNode(childLabel, c1, childQid);
-              if (parentId && childId) {
-                const edgeId = `e-${parentId}-${childId}`;
-                setEdges(prev => {
-                  const edgeExists = prev.some(e => e.id === edgeId);
-                  if (!edgeExists) {
-                    setTimeout(() => layout('TB'), 100);
-                    return [...prev, createEdge(parentId, childId)];
-                  }
-                  return prev;
-                });
-
-                setNodes(prev => prev.map(n => {
-                  // Always ensure label-based expand is present
-                  if (n.id === parentId && !n.data.onExpand) return { ...n, data: { ...n.data, onExpand: () => expandNodeByLabel(n.data.label) } };
-                  if (n.id === childId && !n.data.onExpand) return { ...n, data: { ...n.data, onExpand: () => expandNodeByLabel(n.data.label) } };
-                  return n;
-                }));
-              }
+              
+              // Queue relationship for batch processing
+              relationshipsToAdd.push({
+                childLabel,
+                parentLabel,
+                childCategory: c1,
+                parentCategory: c2,
+                childQid,
+                parentQid
+              });
             }
           }
           break; }
@@ -832,8 +835,110 @@ const LanguageTreePage = () => {
           break;
       }
     }
+    
+    // Process all queued relationships in one batch
+    if (relationshipsToAdd.length > 0) {
+      const newNodes: LanguageRFNode[] = [];
+      const newEdges: Edge[] = [];
+      const nodeMap = new Map<string, string>(); // label -> id for this batch
+      
+      // First pass: ensure all nodes exist
+      relationshipsToAdd.forEach(rel => {
+        // Parent node
+        if (!labelToIdRef.current.has(rel.parentLabel) && !nodeMap.has(rel.parentLabel)) {
+          let parentId = slugify(rel.parentLabel);
+          let attempts = 1;
+          while ([...labelToIdRef.current.values()].includes(parentId) || [...nodeMap.values()].includes(parentId)) {
+            attempts += 1;
+            parentId = `${slugify(rel.parentLabel)}-${attempts}`;
+          }
+          nodeMap.set(rel.parentLabel, parentId);
+          labelToIdRef.current.set(rel.parentLabel, parentId);
+          newNodes.push({
+            id: parentId,
+            data: {
+              label: rel.parentLabel,
+              category: rel.parentCategory,
+              meta: rel.parentCategory ? humanizeCategory(rel.parentCategory) : undefined,
+              qid: rel.parentQid,
+              onExpand: () => expandNodeByLabel(rel.parentLabel)
+            },
+            position: { x: 0, y: 0 },
+            type: 'language'
+          });
+        }
+        
+        // Child node
+        if (!labelToIdRef.current.has(rel.childLabel) && !nodeMap.has(rel.childLabel)) {
+          let childId = slugify(rel.childLabel);
+          let attempts = 1;
+          while ([...labelToIdRef.current.values()].includes(childId) || [...nodeMap.values()].includes(childId)) {
+            attempts += 1;
+            childId = `${slugify(rel.childLabel)}-${attempts}`;
+          }
+          nodeMap.set(rel.childLabel, childId);
+          labelToIdRef.current.set(rel.childLabel, childId);
+          newNodes.push({
+            id: childId,
+            data: {
+              label: rel.childLabel,
+              category: rel.childCategory,
+              meta: rel.childCategory ? humanizeCategory(rel.childCategory) : undefined,
+              qid: rel.childQid,
+              onExpand: () => expandNodeByLabel(rel.childLabel)
+            },
+            position: { x: 0, y: 0 },
+            type: 'language'
+          });
+        }
+      });
+      
+      // Second pass: create edges
+      relationshipsToAdd.forEach(rel => {
+        const parentId = nodeMap.get(rel.parentLabel) || labelToIdRef.current.get(rel.parentLabel);
+        const childId = nodeMap.get(rel.childLabel) || labelToIdRef.current.get(rel.childLabel);
+        if (parentId && childId) {
+          const edgeId = `e-${parentId}-${childId}`;
+          newEdges.push({
+            id: edgeId,
+            source: parentId,
+            target: childId,
+            type: 'simplebezier',
+            animated: true,
+            markerEnd: defaultEdgeOptions.markerEnd ? { ...defaultEdgeOptions.markerEnd } : undefined,
+            style: defaultEdgeOptions.style ? { ...defaultEdgeOptions.style } : undefined,
+          });
+        }
+      });
+      
+      // Apply all new nodes and edges at once
+      if (newNodes.length > 0 || newEdges.length > 0) {
+        setNodes(prev => {
+          const combined = [...prev, ...newNodes];
+          setEdges(prevEdges => {
+            // Filter out duplicate edges
+            const edgeIds = new Set(prevEdges.map(e => e.id));
+            const uniqueNewEdges = newEdges.filter(e => !edgeIds.has(e.id));
+            const allEdges = [...prevEdges, ...uniqueNewEdges];
+            
+            // Apply layout to the combined graph
+            const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+              combined.map(n => ({ ...n })),
+              allEdges,
+              layoutDirection
+            );
+            
+            // Set the layouted versions
+            setNodes(layoutedNodes);
+            return layoutedEdges;
+          });
+          return combined; // Return unchanged (setNodes inside setEdges will replace)
+        });
+      }
+    }
+    
     lastProcessedIndexRef.current = messages.length;
-  }, [messages, autoLayoutOnComplete, layout, ensureNode, setEdges, createEdge, expandNodeByQid, humanizeCategory, setNodes, expandNodeByLabel, canonical, nodes, handleFitView, requestSuggestions, language, depth]);
+  }, [messages, autoLayoutOnComplete, layout, ensureNode, setEdges, createEdge, expandNodeByQid, humanizeCategory, setNodes, expandNodeByLabel, canonical, nodes, handleFitView, requestSuggestions, language, depth, defaultEdgeOptions, layoutDirection, slugify]);
 
   const resetGraphState = useCallback((statusMessage: string) => {
     setNodes([]);
@@ -1313,7 +1418,7 @@ const LanguageTreePage = () => {
       const msg = error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error';
       alert(`Failed to load graph: ${msg}`);
     }
-  }, [getToken, resetGraphState, setEdges, createEdge, setNodes, layoutDirection, humanizeCategory, expandNodeByLabel, fitViewApi]);
+  }, [getToken, resetGraphState, setEdges, createEdge, setNodes, layoutDirection, humanizeCategory, expandNodeByLabel, fitViewApi, slugify]);
 
   // Delete a saved graph
   const handleDeleteGraph = useCallback(async (graphId: string, graphName: string) => {
