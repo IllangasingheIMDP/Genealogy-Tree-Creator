@@ -733,24 +733,124 @@ const LanguageTreePage = () => {
 
           const parsedAdded = added.map(toRelationshipRecord).filter((r): r is RelationshipRecord => r !== null);
 
-          // Ensure nodes exist and append only new edges
-          for (const r of parsedAdded) {
+          // Build all new nodes and edges in memory first to avoid batching issues
+          const newNodes: LanguageRFNode[] = [];
+          const newEdges: Edge[] = [];
+          const nodeMap = new Map<string, string>(); // label -> id for this expansion
+
+          // First pass: create all missing nodes
+          parsedAdded.forEach(r => {
             const parentLabel = preferExistingLabel(r.language2);
             const childLabel = preferExistingLabel(r.language1);
-            if (!parentLabel || !childLabel) continue;
-            const parentId = ensureNode(parentLabel, r.language2_category, r.language2_qid);
-            const childId = ensureNode(childLabel, r.language1_category, r.language1_qid);
-            if (!parentId || !childId) continue;
-            const eid = `e-${parentId}-${childId}`;
-            setEdges(prev => prev.some(e => e.id === eid) ? prev : [...prev, createEdge(parentId, childId)]);
-          }
+            if (!parentLabel || !childLabel) return;
 
-          // Ensure expand buttons remain available
-          setNodes(prev => prev.map(n => ({ ...n, data: { ...n.data, onExpand: () => expandNodeByLabel(n.data.label) } })));
+            // Parent node
+            if (!labelToIdRef.current.has(parentLabel) && !nodeMap.has(parentLabel)) {
+              let parentId = slugify(parentLabel);
+              let attempts = 1;
+              while ([...labelToIdRef.current.values()].includes(parentId) || [...nodeMap.values()].includes(parentId)) {
+                attempts += 1;
+                parentId = `${slugify(parentLabel)}-${attempts}`;
+              }
+              nodeMap.set(parentLabel, parentId);
+              labelToIdRef.current.set(parentLabel, parentId);
+              newNodes.push({
+                id: parentId,
+                data: {
+                  label: parentLabel,
+                  category: r.language2_category,
+                  meta: r.language2_category ? humanizeCategory(r.language2_category) : undefined,
+                  qid: r.language2_qid,
+                  onExpand: () => expandNodeByLabel(parentLabel)
+                },
+                position: { x: 0, y: 0 },
+                type: 'language'
+              });
+            }
+
+            // Child node
+            if (!labelToIdRef.current.has(childLabel) && !nodeMap.has(childLabel)) {
+              let childId = slugify(childLabel);
+              let attempts = 1;
+              while ([...labelToIdRef.current.values()].includes(childId) || [...nodeMap.values()].includes(childId)) {
+                attempts += 1;
+                childId = `${slugify(childLabel)}-${attempts}`;
+              }
+              nodeMap.set(childLabel, childId);
+              labelToIdRef.current.set(childLabel, childId);
+              newNodes.push({
+                id: childId,
+                data: {
+                  label: childLabel,
+                  category: r.language1_category,
+                  meta: r.language1_category ? humanizeCategory(r.language1_category) : undefined,
+                  qid: r.language1_qid,
+                  onExpand: () => expandNodeByLabel(childLabel)
+                },
+                position: { x: 0, y: 0 },
+                type: 'language'
+              });
+            }
+          });
+
+          // Second pass: create edges
+          parsedAdded.forEach(r => {
+            const parentLabel = preferExistingLabel(r.language2);
+            const childLabel = preferExistingLabel(r.language1);
+            if (!parentLabel || !childLabel) return;
+
+            const parentId = nodeMap.get(parentLabel) || labelToIdRef.current.get(parentLabel);
+            const childId = nodeMap.get(childLabel) || labelToIdRef.current.get(childLabel);
+            if (parentId && childId) {
+              const eid = `e-${parentId}-${childId}`;
+              newEdges.push({
+                id: eid,
+                source: parentId,
+                target: childId,
+                type: 'simplebezier',
+                animated: true,
+                markerEnd: defaultEdgeOptions.markerEnd ? { ...defaultEdgeOptions.markerEnd } : undefined,
+                style: defaultEdgeOptions.style ? { ...defaultEdgeOptions.style } : undefined,
+              });
+            }
+          });
+
+          // Apply all updates atomically with layout
+          if (newNodes.length > 0 || newEdges.length > 0) {
+            setNodes(prev => {
+              const combinedNodes = [...prev, ...newNodes].map(n => ({
+                ...n,
+                data: { ...n.data, onExpand: () => expandNodeByLabel(n.data.label) }
+              }));
+              
+              setEdges(prevEdges => {
+                // Filter out duplicate edges
+                const existingEdgeIds = new Set(prevEdges.map(e => e.id));
+                const uniqueNewEdges = newEdges.filter(e => !existingEdgeIds.has(e.id));
+                const combinedEdges = [...prevEdges, ...uniqueNewEdges];
+                
+                // Apply layout to complete graph
+                const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+                  combinedNodes,
+                  combinedEdges,
+                  layoutDirection
+                );
+                
+                // Commit layouted state after this render cycle completes
+                setTimeout(() => {
+                  setNodes(layoutedNodes);
+                  setEdges(layoutedEdges);
+                }, 0);
+                
+                return combinedEdges;
+              });
+              
+              return combinedNodes;
+            });
+          }
 
           const addedCount = parsedAdded.length;
           if (label) setStatus(`Expanded "${label}": ${addedCount} new relationship(s).`);
-          if (autoLayoutOnComplete) setTimeout(() => layout(), 0);
           break; }
         case 'complete': {
           completeRef.current = true;
