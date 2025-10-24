@@ -39,3 +39,5 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+backend/language-tree-service/language_resolver_cache.sqlite
+backend/language-tree-service/language_graph_cache.sqlite
