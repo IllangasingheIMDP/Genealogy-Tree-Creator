@@ -902,14 +902,17 @@ const LanguageTreePage = () => {
         return undefined;
       };
 
+      // Collect all classification data first, then apply in one batch
+      const allClassificationData: Record<string, { qid?: string; types?: string[] } | null> = {};
+
       for (let i = 0; i < uniqueLabels.length; i += chunkSize) {
         const batch = uniqueLabels.slice(i, i + chunkSize);
         setStatus(`Classifying languages ${i + 1}-${Math.min(i + batch.length, uniqueLabels.length)} of ${uniqueLabels.length}...`);
         setProgress(Math.round(((i) / uniqueLabels.length) * 100));
         const token = getToken();
         if (!token) {
-        router.push('/login');
-        return;
+          router.push('/login');
+          return;
         }
         const resp = await fetch(`${httpBase}/classify/languages`, {
           method: 'POST',
@@ -920,34 +923,57 @@ const LanguageTreePage = () => {
           const err = await resp.text();
           throw new Error(err || 'Classification request failed');
         }
-  const data: Record<string, { qid?: string; types?: string[] } | null> = await resp.json();
-        // Update nodes with qids, raw types, and inferred categories (non-destructive: don't overwrite existing category)
-        setNodes(prev => prev.map(n => {
-          const lbl = n.data.label;
-          if (!batch.includes(lbl)) return n;
-          const res = data[lbl];
-          const updates: Partial<LanguageNodeData> = {};
-          if (res && res.qid && n.data.qid !== res.qid) updates.qid = res.qid;
-          if (res && res.types && res.types.length) updates.types = res.types;
-          if (!res || !res.types || res.types.length === 0) {
-            // No type resolved: mark as unresolved
-            updates.category = 'unresolved';
-            updates.meta = 'Unresolved';
-          } else {
-            const inferredCat = chooseCategory(res.types);
-            if (inferredCat) {
-              updates.category = inferredCat;
-              updates.meta = humanizeCategory(inferredCat);
-            }
-          }
-          return Object.keys(updates).length ? { ...n, data: { ...n.data, ...updates } } : n;
-        }));
+        const data: Record<string, { qid?: string; types?: string[] } | null> = await resp.json();
+        
+        // Accumulate all classification results
+        Object.assign(allClassificationData, data);
+        
         processed += batch.length;
         setProgress(Math.round((processed / uniqueLabels.length) * 100));
       }
+      
+      // Now apply all updates in a single setState call
+      setNodes(prev => prev.map(n => {
+        const lbl = n.data.label;
+        const res = allClassificationData[lbl];
+        if (!res) return n; // No classification data for this label
+        
+        const updates: Partial<LanguageNodeData> = {};
+        if (res.qid && n.data.qid !== res.qid) updates.qid = res.qid;
+        if (res.types && res.types.length) updates.types = res.types;
+        
+        if (!res.types || res.types.length === 0) {
+          // No type resolved: mark as unresolved
+          updates.category = 'unresolved';
+          updates.meta = 'Unresolved';
+        } else {
+          const inferredCat = chooseCategory(res.types);
+          if (inferredCat) {
+            updates.category = inferredCat;
+            updates.meta = humanizeCategory(inferredCat);
+          }
+        }
+        return Object.keys(updates).length ? { ...n, data: { ...n.data, ...updates } } : n;
+      }));
+      
       setStatus('Classification complete');
-      // Optional: relayout if categories changed visual sizing
-      setTimeout(() => layout(), 0);
+      setProgress(100);
+      
+      // Layout with the updated nodes after state settles
+      setTimeout(() => {
+        setNodes(currentNodes => {
+          setEdges(currentEdges => {
+            const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+              [...currentNodes.map(n => ({ ...n }))],
+              [...currentEdges],
+              layoutDirection
+            );
+            setNodes(layoutedNodes);
+            return layoutedEdges;
+          });
+          return currentNodes;
+        });
+      }, 50);
     } catch (err) {
       console.error('Classification error:', err);
       const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -955,7 +981,7 @@ const LanguageTreePage = () => {
     } finally {
       setClassifying(false);
     }
-  }, [classifying, httpBase, humanizeCategory, layout, nodes, setNodes, setStatus, setProgress, getToken, router]);
+  }, [classifying, httpBase, humanizeCategory, nodes, setNodes, setStatus, setProgress, getToken, router, setEdges, layoutDirection]);
 
   
   // (Save graph removed for now to reduce lint noise; can be reintroduced in toolbar when needed)
